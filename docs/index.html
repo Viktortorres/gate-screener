@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101820">
+<title>Фьючерсы Gate</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101820;color:#eef4f7;
+font:16px system-ui,sans-serif}
+main{max-width:820px;margin:auto;padding:24px 16px}
+h1{font-size:28px;margin:0 0 8px}
+.muted{color:#a8b9c8;font-size:13px;line-height:1.6}
+section{background:#1a2633;border:1px solid #304254;
+border-radius:16px;padding:16px;margin:20px 0}
+nav{display:flex;gap:10px;margin:16px 0}
+input,button{border:1px solid #40556b;border-radius:10px;
+padding:12px;font:inherit}
+input{background:#182330;color:white;min-width:0;flex:1}
+button{background:#b4f35c;color:#14200c;font-weight:600}
+button:disabled{opacity:.5}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{color:#9badbe;font-size:12px}
+td,th{padding:14px 5px;border-bottom:1px solid #304254;
+text-align:right}
+th:first-child,td:first-child{text-align:left}
+a{color:#eef4f7;text-decoration:none;font-weight:650}
+.positive{color:#a9f06b}
+.negative{color:#ff8796}
+small{display:block;color:#9badbe;font-size:11px}
+#status,#times{white-space:pre-line}
+footer{margin:20px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>Фьючерсы Gate</h1>
+<div class="muted">USDT · Рост за 24 часа ↓ · Цена ≥ ATH ÷ 3</div>
+
+<section>
+<div id="status" role="status" aria-live="polite">Загрузка…</div>
+<div id="times" class="muted"></div>
+</section>
+
+<nav>
+<input id="search" placeholder="Поиск монеты" aria-label="Поиск монеты">
+<button id="refresh">Обновить</button>
+</nav>
+
+<div id="count" class="muted"></div>
+<table>
+<thead>
+<tr>
+<th>Контракт / цена</th>
+<th>24ч ↓</th>
+<th>ATH / цена</th>
+</tr>
+</thead>
+<tbody id="rows"></tbody>
+</table>
+
+<footer class="muted">
+ATH фьючерса на Gate обновляется ежедневно.
+Цены загружаются автоматически при открытии и возвращении на страницу.
+Максимум последних 24 часов также учитывается.
+</footer>
+</main>
+
+<script>
+let selected = [];
+let loading = false;
+const $ = id => document.getElementById(id);
+
+function date(value) {
+  return new Date(value).toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow"
+  }) + " МСК";
+}
+
+async function request(url) {
+  const response = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(30000)
+  });
+  if (!response.ok) throw new Error("HTTP " + response.status);
+  return response.json();
+}
+
+function select(tickers, history) {
+  return tickers.flatMap(t => {
+    const record = history.contracts[t.contract];
+    const price = Number(t.last);
+    const change = Number(t.change_percentage);
+
+    if (!record || !Number.isFinite(price) || price <= 0 ||
+        !Number.isFinite(change)) return [];
+
+    const ath = Math.max(
+      Number(record.ath),
+      price,
+      Number(t.high_24h) || 0
+    );
+
+    if (!Number.isFinite(ath) || ath / price > 3) return [];
+
+    return [{
+      name: t.contract,
+      price,
+      change,
+      ratio: ath / price
+    }];
+  }).sort((a, b) => b.change - a.change);
+}
+
+function render() {
+  const query = $("search").value.trim().toUpperCase();
+  const visible = selected.filter(r => r.name.includes(query));
+  $("rows").replaceChildren();
+
+  for (const r of visible) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    const link = document.createElement("a");
+
+    link.href = "https://www.gate.com/futures/USDT/" +
+      encodeURIComponent(r.name);
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = r.name.replace("_USDT", "");
+
+    const price = document.createElement("small");
+    price.textContent = "$" + r.price.toLocaleString("en-US", {
+      maximumSignificantDigits: 8
+    });
+    name.append(link, price);
+
+    const change = document.createElement("td");
+    change.className = r.change >= 0 ? "positive" : "negative";
+    change.textContent = (r.change > 0 ? "+" : "") +
+      r.change.toFixed(2) + "%";
+
+    const ratio = document.createElement("td");
+    ratio.textContent = r.ratio.toFixed(2) + "×";
+
+    tr.append(name, change, ratio);
+    $("rows").append(tr);
+  }
+
+  $("count").textContent = "Показано: " + visible.length;
+}
+
+async function refresh() {
+  if (loading) return;
+  loading = true;
+  $("refresh").disabled = true;
+  $("status").textContent = "Загружаем свежие котировки…";
+
+  try {
+    const [history, tickers] = await Promise.all([
+      request("data/ath.json"),
+      request("https://api.gateio.ws/api/v4/futures/usdt/tickers")
+    ]);
+
+    selected = select(tickers, history);
+    render();
+
+    const missing = tickers.filter(
+      t => !history.contracts[t.contract]
+    ).length;
+    const errors = Object.keys(history.errors || {}).length;
+
+    let status = "Котировки обновлены";
+    if (missing) {
+      status += "\nБез проверенного ATH: " + missing + " — скрыты.";
+    }
+    if (errors) {
+      status += "\nОшибки последнего расчёта ATH: " + errors + ".";
+    }
+    if (Date.now() - Date.parse(history.updated_at) >
+        36 * 3600000) {
+      status += "\nБаза ATH старше 36 часов.";
+    }
+
+    $("status").textContent = status;
+    $("times").textContent =
+      "Цены: " + date(Date.now()) +
+      "\nATH: " + date(history.updated_at);
+
+  } catch (error) {
+    $("status").textContent =
+      "Не удалось загрузить свежие данные. " +
+      (selected.length ? "На экране предыдущая подборка. " : "") +
+      "Попробуй «Обновить». При первом запуске дождись " +
+      "расчёта ATH в GitHub Actions.";
+  } finally {
+    loading = false;
+    $("refresh").disabled = false;
+  }
+}
+
+$("refresh").addEventListener("click", refresh);
+$("search").addEventListener("input", render);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refresh();
+});
+
+window.addEventListener("pageshow", event => {
+  if (event.persisted) refresh();
+});
+
+refresh();
+</script>
+</body>
+</html>
