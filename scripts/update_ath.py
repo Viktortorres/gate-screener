@@ -112,4 +112,14 @@ def main():
         "errors": errors,
     }
 
-    PATH.parent
+    PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = PATH.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    )
+    temporary.replace(PATH)
+    print(f"ATH: {len(output)}; ошибок: {len(errors)}")
+
+
+if __name__ == "__main__":
+    main()
