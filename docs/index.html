@@ -79,12 +79,25 @@ function date(value) {
 }
 
 async function request(url) {
-  const response = await fetch(url, {
-    cache: "no-store",
-    signal: AbortSignal.timeout(30000)
-  });
-  if (!response.ok) throw new Error("HTTP " + response.status);
-  return response.json();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(60000)
+      });
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      return await response.json();
+    } catch (error) {
+      if (attempt === 1) {
+        const source = url.includes("gateio")
+          ? "Котировки Gate"
+          : "База ATH";
+        throw new Error(source + ": " + error.message);
+      }
+    }
+  }
 }
 
 function select(tickers, history) {
