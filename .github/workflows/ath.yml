@@ -1,0 +1,42 @@
+name: Update Gate ATH
+
+on:
+  schedule:
+    - cron: '17 0 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/**
+      - .github/workflows/ath.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gate-ath
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Calculate ATH
+        run: python scripts/update_ath.py
+
+      - name: Save ATH
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data/ath.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update Gate futures ATH"
+            git push
+          fi
