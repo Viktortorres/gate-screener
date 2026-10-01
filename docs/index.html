@@ -188,7 +188,7 @@ async function refresh() {
       "\nATH: " + date(history.updated_at);
 
   } catch (error) {
-    $("status").textContent =
+    $("status").textContent = "Причина: " + error.message + "\n" +
       "Не удалось загрузить свежие данные. " +
       (selected.length ? "На экране предыдущая подборка. " : "") +
       "Попробуй «Обновить». При первом запуске дождись " +
